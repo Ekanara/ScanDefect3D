@@ -1,0 +1,8 @@
+﻿{
+  "0": "wall",
+  "1": "floor",
+  "2": "column",
+  "3": "beam",
+  "4": "crack_defect",
+  "5": "misalignment_defect"
+}
