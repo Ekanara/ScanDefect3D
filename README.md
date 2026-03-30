@@ -66,13 +66,33 @@ python scripts/check_gpu.py
 
 ## 3) Prepare Data
 
-### Synthetic quick dataset
+### OpenTrench3D: download raw data
+
+Source:
+- [OpenTrench3D on Kaggle](https://www.kaggle.com/datasets/hestogpony/opentrench3d/data)
+
+Option A (manual):
+- Download from Kaggle UI and extract into `data/OpenTrench3D/`
+
+Option B (Kaggle CLI):
 
 ```powershell
-python scripts/prepare_synthetic_dataset.py --output-root data/synthetic --train-count 300 --val-count 60 --test-count 40
+pip install kaggle
+kaggle datasets download -d hestogpony/opentrench3d -p data/OpenTrench3D --unzip
 ```
 
-### OpenTrench3D multi-task defect dataset
+Expected raw folder layout for this project:
+
+```text
+data/OpenTrench3D/OpenTrench3D/
+  <scene_folder_1>/*.ply
+  <scene_folder_2>/*.ply
+  ...
+```
+
+### Convert OpenTrench3D raw `.ply` to training `.npz`
+
+Run the dataset builder:
 
 ```powershell
 python scripts/prepare_opentrench_defect_dataset.py ^
@@ -80,6 +100,16 @@ python scripts/prepare_opentrench_defect_dataset.py ^
   --output-root data/opentrench3d_defect_multitask_v2_strong ^
   --variants-per-scene 2 ^
   --max-points-per-scene 50000
+```
+
+This conversion generates split folders with `.npz` files:
+- `train/`, `val/`, `test/`
+- each sample contains `points`, `semantic_labels`, and `defect_labels`
+
+### Synthetic quick dataset
+
+```powershell
+python scripts/prepare_synthetic_dataset.py --output-root data/synthetic --train-count 300 --val-count 60 --test-count 40
 ```
 
 ## 4) Train Models
