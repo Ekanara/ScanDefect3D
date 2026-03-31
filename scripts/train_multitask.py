@@ -71,6 +71,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--min-lr", type=float, default=1e-6)
+    parser.add_argument("--lr-scheduler", type=str, default="none", choices=["none", "plateau", "cosine"])
+    parser.add_argument("--lr-factor", type=float, default=0.5, help="Only for plateau scheduler.")
+    parser.add_argument("--lr-patience", type=int, default=2, help="Only for plateau scheduler.")
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--semantic-loss-weight", type=float, default=1.0)
     parser.add_argument("--semantic-use-class-weight", action="store_true")
@@ -86,6 +90,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--early-stop-patience", type=int, default=5)
     parser.add_argument("--min-epochs", type=int, default=5)
     parser.add_argument("--hard-stop-epoch", type=int, default=5, help="Hard stop at this epoch for quick iterations. Set 0 to disable.")
+    parser.add_argument("--init-checkpoint", type=str, default="", help="Load model state from an existing checkpoint for fine-tuning.")
+    parser.add_argument("--resume-optimizer", action="store_true", help="When set with --init-checkpoint, also load optimizer state.")
+    parser.add_argument("--save-best-by", type=str, default="score", choices=["score", "val_loss"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--save-dir", type=str, default="checkpoints")
     parser.add_argument("--exp-name", type=str, default="opentrench_multitask_pointnet2")
@@ -338,6 +345,33 @@ def main() -> None:
 
     model = build_multitask_model(model_name=args.model, num_semantic_classes=args.semantic_classes, input_dim=args.input_dim).to(device)
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    init_epoch = 0
+    if args.init_checkpoint:
+        init_ckpt = torch.load(args.init_checkpoint, map_location="cpu")
+        model.load_state_dict(init_ckpt["model_state_dict"], strict=True)
+        init_epoch = int(init_ckpt.get("epoch", 0))
+        if args.resume_optimizer and "optimizer_state_dict" in init_ckpt:
+            optimizer.load_state_dict(init_ckpt["optimizer_state_dict"])
+        print(
+            f"Loaded init checkpoint: {Path(args.init_checkpoint).resolve().as_posix()} "
+            f"(epoch={init_epoch})"
+        )
+
+    scheduler = None
+    if args.lr_scheduler == "plateau":
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer=optimizer,
+            mode="min",
+            factor=args.lr_factor,
+            patience=args.lr_patience,
+            min_lr=args.min_lr,
+        )
+    elif args.lr_scheduler == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer=optimizer,
+            T_max=max(args.epochs, 1),
+            eta_min=args.min_lr,
+        )
     scaler = torch.amp.GradScaler("cuda" if device.type == "cuda" else "cpu", enabled=device.type == "cuda")
 
     semantic_class_weight = None
@@ -356,6 +390,7 @@ def main() -> None:
     print(f"Train samples: {len(train_ds)} | Val samples: {len(val_ds)}")
     print(f"Defect task level: {args.defect_task_level}")
     print(f"Defect scene pooling: {args.defect_scene_pooling}")
+    print(f"LR scheduler: {args.lr_scheduler}")
     train_scene_pos_ratio = compute_scene_positive_ratio(train_ds.files, args.scene_defect_min_ratio_train)
     val_scene_pos_ratio = compute_scene_positive_ratio(val_ds.files, args.scene_defect_min_ratio_val)
     print(
@@ -421,6 +456,7 @@ def main() -> None:
             "epoch": epoch,
             "train_loss": train_loss,
             "val_loss": val_loss,
+            "lr": float(optimizer.param_groups[0]["lr"]),
             **{f"train_{k}": v for k, v in train_metrics.items()},
             **{f"val_{k}": v for k, v in val_metrics.items()},
         }
@@ -437,15 +473,26 @@ def main() -> None:
         torch.save(checkpoint, run_dir / "last.pt")
 
         score = val_metrics["semantic_miou"] + val_metrics["defect_f1"]
-        if score > best_score:
-            best_score = score
-            torch.save(checkpoint, run_dir / "best.pt")
+        if args.save_best_by == "val_loss":
+            if epoch == 1 or val_loss < best_score:
+                best_score = val_loss
+                torch.save(checkpoint, run_dir / "best.pt")
+        else:
+            if score > best_score:
+                best_score = score
+                torch.save(checkpoint, run_dir / "best.pt")
 
         if val_metrics["defect_f1"] > best_defect_f1 + 1e-6:
             best_defect_f1 = val_metrics["defect_f1"]
             epochs_without_improve = 0
         else:
             epochs_without_improve += 1
+
+        if scheduler is not None:
+            if args.lr_scheduler == "plateau":
+                scheduler.step(val_loss)
+            else:
+                scheduler.step()
 
         if epoch >= args.min_epochs and epochs_without_improve >= args.early_stop_patience:
             print(
@@ -460,7 +507,8 @@ def main() -> None:
     with (run_dir / "history.json").open("w", encoding="utf-8") as f:
         json.dump(history, f, indent=2, ensure_ascii=False)
 
-    print(f"Training done in {time() - t0:.1f}s, best score={best_score:.4f}")
+    best_label = "best val_loss" if args.save_best_by == "val_loss" else "best score"
+    print(f"Training done in {time() - t0:.1f}s, {best_label}={best_score:.4f}")
     print(f"Checkpoint directory: {run_dir.resolve().as_posix()}")
 
 

@@ -1,48 +1,50 @@
 # ScanDefect3D
 
-ScanDefect3D is a 3D construction-defect detection project built on point clouds and deep learning.
+**3D construction-defect detection using point clouds and deep learning.**
 
-The project supports:
-- Point cloud preprocessing (Open3D)
-- Semantic segmentation (PointNet / PointNet++)
-- Defect detection
-- OpenTrench3D multi-task training (semantic head + defect head)
+ScanDefect3D supports the full pipeline — from raw point cloud preprocessing through semantic segmentation, defect detection, and multi-task model training — built on top of Open3D, PointNet/PointNet++, and a custom OpenTrench3D multi-task architecture.
+
+---
 
 ## Features
 
-- Load, visualize, downsample, and denoise point clouds
-- Train single-task segmentation models:
-  - `PointNet`
-  - `PointNet++ (SSG)`
-- Train multi-task OpenTrench3D models:
-  - Head 1: semantic classes `0..4`
-  - Head 2: defect classification `0/1`
-- Save checkpoints and run inference/visualization scripts
+- Load, visualize, downsample, and denoise point clouds (Open3D)
+- Train single-task segmentation models: PointNet and PointNet++ (SSG)
+- Train multi-task OpenTrench3D models with two heads:
+  - **Semantic head** — classifies points into classes 0–4
+  - **Defect head** — binary defect classification (normal / defect)
+- Run inference from `.npz` point cloud files or directly from images (URL or local)
+- Save checkpoints and visualize predictions as colored `.ply` files
+
+---
 
 ## Repository Structure
 
-```text
+```
 ScanDefect3D/
-  configs/
-  scripts/
-    check_gpu.py
-    prepare_synthetic_dataset.py
-    prepare_opentrench_defect_dataset.py
-    train.py
-    train_multitask.py
-    infer.py
-    visualize_prediction.py
-  src/scandefect3d/
-    data/
-    models/
-    utils/
-  pyproject.toml
-  requirements.txt
+├── configs/
+├── scripts/
+│   ├── check_gpu.py
+│   ├── prepare_synthetic_dataset.py
+│   ├── prepare_opentrench_defect_dataset.py
+│   ├── train.py
+│   ├── train_multitask.py
+│   ├── infer.py
+│   ├── infer_image_defect.py
+│   └── visualize_prediction.py
+├── src/scandefect3d/
+│   ├── data/
+│   ├── models/
+│   └── utils/
+├── pyproject.toml
+└── requirements.txt
 ```
 
-## 1) Create Virtual Environment
+---
 
-### Windows (PowerShell)
+## Setup
+
+### 1. Create a virtual environment (Windows / PowerShell)
 
 ```powershell
 py -3.11 -m venv .venv
@@ -50,7 +52,7 @@ py -3.11 -m venv .venv
 python -m pip install --upgrade pip
 ```
 
-## 2) Install PyTorch (GPU) and Dependencies
+### 2. Install PyTorch (GPU) and project dependencies
 
 ```powershell
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
@@ -58,41 +60,39 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-Verify CUDA/GPU:
+Verify your CUDA/GPU setup:
 
 ```powershell
 python scripts/check_gpu.py
 ```
 
-## 3) Prepare Data
+---
 
-### OpenTrench3D: download raw data
+## Data Preparation
 
-Source:
-- [OpenTrench3D on Kaggle](https://www.kaggle.com/datasets/hestogpony/opentrench3d/data)
+### Option A — OpenTrench3D (real data, recommended)
 
-Option A (manual):
-- Download from Kaggle UI and extract into `data/OpenTrench3D/`
+**Step 1: Download the raw dataset**
 
-Option B (Kaggle CLI):
+Source: [OpenTrench3D on Kaggle](https://www.kaggle.com/datasets/hestogpony/opentrench3d/data)
+
+Download manually via the Kaggle UI, or use the CLI:
 
 ```powershell
 pip install kaggle
 kaggle datasets download -d hestogpony/opentrench3d -p data/OpenTrench3D --unzip
 ```
 
-Expected raw folder layout for this project:
+Expected folder layout after extraction:
 
-```text
+```
 data/OpenTrench3D/OpenTrench3D/
   <scene_folder_1>/*.ply
   <scene_folder_2>/*.ply
   ...
 ```
 
-### Convert OpenTrench3D raw `.ply` to training `.npz`
-
-Run the dataset builder:
+**Step 2: Convert raw `.ply` files to training `.npz` format**
 
 ```powershell
 python scripts/prepare_opentrench_defect_dataset.py ^
@@ -102,56 +102,135 @@ python scripts/prepare_opentrench_defect_dataset.py ^
   --max-points-per-scene 50000
 ```
 
-This conversion generates split folders with `.npz` files:
-- `train/`, `val/`, `test/`
-- each sample contains `points`, `semantic_labels`, and `defect_labels`
+This generates `train/`, `val/`, and `test/` splits. Each `.npz` sample contains `points`, `semantic_labels`, and `defect_labels`.
 
-### Synthetic quick dataset
+### Option B — Synthetic dataset (quick start)
 
 ```powershell
-python scripts/prepare_synthetic_dataset.py --output-root data/synthetic --train-count 300 --val-count 60 --test-count 40
+python scripts/prepare_synthetic_dataset.py \
+  --output-root data/synthetic \
+  --train-count 300 \
+  --val-count 60 \
+  --test-count 40
 ```
 
-## 4) Train Models
+---
+
+## Training
 
 ### Single-task: PointNet
 
 ```powershell
-python scripts/train.py --dataset-type npz --data-root data/synthetic --train-split train --val-split val --model pointnet --num-classes 6 --input-dim 3 --epochs 30 --batch-size 16 --num-points 4096 --exp-name pointnet_synthetic
+python scripts/train.py \
+  --dataset-type npz \
+  --data-root data/synthetic \
+  --train-split train \
+  --val-split val \
+  --model pointnet \
+  --num-classes 6 \
+  --input-dim 3 \
+  --epochs 30 \
+  --batch-size 16 \
+  --num-points 4096 \
+  --exp-name pointnet_synthetic
 ```
 
 ### Single-task: PointNet++
 
 ```powershell
-python scripts/train.py --dataset-type npz --data-root data/synthetic --train-split train --val-split val --model pointnet2 --num-classes 6 --input-dim 3 --epochs 30 --batch-size 8 --num-points 4096 --exp-name pointnet2_synthetic
+python scripts/train.py \
+  --dataset-type npz \
+  --data-root data/synthetic \
+  --train-split train \
+  --val-split val \
+  --model pointnet2 \
+  --num-classes 6 \
+  --input-dim 3 \
+  --epochs 30 \
+  --batch-size 8 \
+  --num-points 4096 \
+  --exp-name pointnet2_synthetic
 ```
 
-### Multi-task (recommended): PointNet++ + Transformer context
+### Multi-task: PointNet++ + Transformer (recommended)
 
 ```powershell
-python scripts/train_multitask.py --model pointnet2_transformer --data-root data/opentrench3d_defect_multitask_v2_strong_samplesplit --defect-task-level scene --defect-scene-threshold 0.001 --defect-scene-pooling topk --defect-scene-topk-ratio 0.03 --defect-pos-weight 12 --defect-loss-weight 0.5 --semantic-loss-weight 2.0 --train-defect-sampling-ratio 0.55 --hard-stop-epoch 5 --exp-name pointnet2_transformer_v5_semstrong
+python scripts/train_multitask.py \
+  --model pointnet2_transformer \
+  --data-root data/opentrench3d_defect_multitask_v2_strong_samplesplit \
+  --defect-task-level scene \
+  --defect-scene-threshold 0.001 \
+  --defect-scene-pooling topk \
+  --defect-scene-topk-ratio 0.03 \
+  --defect-pos-weight 12 \
+  --defect-loss-weight 0.5 \
+  --semantic-loss-weight 2.0 \
+  --train-defect-sampling-ratio 0.55 \
+  --hard-stop-epoch 5 \
+  --exp-name pointnet2_transformer_v5_semstrong
 ```
 
-Checkpoints are saved in:
+Checkpoints are saved to `checkpoints/<exp-name>/`.
 
-```text
-checkpoints/<exp-name>/
-```
+---
 
-## 5) Inference
+## Inference
+
+### From a point cloud file
 
 ```powershell
-python scripts/infer.py --checkpoint checkpoints/pointnet_synthetic/best.pt --input data/synthetic/test/test_0000.npz --output-dir outputs --num-points 4096 --num-votes 8 --defect-class-ids 4,5 --save-colored-ply
+python scripts/infer.py \
+  --checkpoint checkpoints/pointnet_synthetic/best.pt \
+  --input data/synthetic/test/test_0000.npz \
+  --output-dir outputs \
+  --num-points 4096 \
+  --num-votes 8 \
+  --defect-class-ids 4,5 \
+  --save-colored-ply
 ```
 
-## 6) Visualization
+### From an image (URL or local file)
+
+This pipeline converts an image to a pseudo point cloud using luminance-based pseudo depth, then runs the multi-task model to produce a scene-level defect prediction (`defect` / `normal`) and a point-level defect map.
+
+**From URL:**
+```powershell
+python scripts/infer_image_defect.py \
+  --checkpoint checkpoints/pointnet2_transformer_v5_semstrong/best.pt \
+  --image-url URL \ # Insert Image URL here
+  --output-dir outputs/image_infer \
+  --num-votes 4 \
+  --max-points 60000 \
+  --num-points 4096 \
+  --save-colored-ply
+```
+
+**From a local file:**
+```powershell
+python scripts/infer_image_defect.py \
+  --checkpoint checkpoints/pointnet2_transformer_v5_semstrong/best.pt \
+  --image-path path/to/your/local_image.jpg \
+  --output-dir outputs/image_infer_local \
+  --num-votes 4 \
+  --max-points 60000 \
+  --num-points 4096 \
+  --save-colored-ply
+```
+
+---
+
+## Visualization
 
 ```powershell
-python scripts/visualize_prediction.py --pred-npz outputs/test_0000_pred.npz --defect-class-ids 4,5
+python scripts/visualize_prediction.py \
+  --pred-npz outputs/test_0000_pred.npz \
+  --defect-class-ids 4,5
 ```
+
+---
 
 ## Notes
 
-- `class 4 (Misc)` is ignored by default in semantic loss for OpenTrench3D multi-task training.
-- For fast iteration, `--hard-stop-epoch 5` is enabled in sample commands.
-- In scene-level defect mode, very low thresholds can increase recall but also increase false positives.
+- **Class 4 (Misc)** is ignored by default in the semantic loss for OpenTrench3D multi-task training.
+- **`--hard-stop-epoch 5`** is set in the sample commands above for fast iteration; increase or remove this flag for full training runs.
+- In scene-level defect mode, lowering `--defect-scene-threshold` increases recall but may also increase false positives.
